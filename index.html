@@ -3,68 +3,89 @@
 <head>
   <meta charset="utf-8" />
   <title>Jewel Bank Monitor</title>
-  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
+  <link rel="stylesheet"
+        href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
   <style>
-    body { font-family: Arial, sans-serif; margin: 18px; }
-    h1 { margin: 0 0 8px 0; }
-    .meta { color:#555; margin: 0 0 14px 0; }
-    .note { color:#777; font-size: 12px; margin-top: 10px; }
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+
+    h1 {
+      margin-bottom: 5px;
+    }
+
+    .meta {
+      margin-bottom: 15px;
+      color: #94a3b8;
+    }
+
+    table.dataTable {
+      background: #1e293b;
+      color: #e2e8f0;
+    }
+
+    .dataTables_wrapper .dataTables_filter input {
+      background: #0f172a;
+      color: white;
+      border: 1px solid #334155;
+      padding: 4px;
+    }
   </style>
 </head>
 <body>
-  <h1>Jewel Bank Monitor</h1>
-  <div class="meta" id="meta">Loading…</div>
 
-  <table id="tbl" class="display" style="width:100%">
-    <thead>
-      <tr>
-        <th>AccountID</th>
-        <th>ItemIndex</th>
-        <th>Group</th>
-        <th>Type</th>
-        <th>ItemName</th>
-        <th>ItemLevel</th>
-        <th>ItemCount</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+<h1>💎 Jewel Bank Monitor</h1>
+<div class="meta" id="meta">Loading...</div>
 
-  <div class="note">
-    Tip: Use the search box (top right) to filter (e.g. “Bless”, “Soul”, “Chaos”). Click a column header to sort.
-  </div>
+<table id="tbl" class="display" style="width:100%">
+  <thead>
+    <tr>
+      <th>AccountID</th>
+      <th>Item Name</th>
+      <th>Level</th>
+      <th>Quantity</th>
+    </tr>
+  </thead>
+  <tbody></tbody>
+</table>
 
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-  <script>
-    async function main() {
-      const res = await fetch('./data.json', { cache: 'no-store' });
-      const payload = await res.json();
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
 
-      document.getElementById('meta').textContent =
-        `Updated: ${payload.generated_at} | Rows: ${payload.rows.length} | Unknown mappings: ${payload.unknown_mappings}`;
+<script>
+async function loadData() {
+  const response = await fetch('./data.json', { cache: 'no-store' });
+  const payload = await response.json();
 
-      const tbody = document.querySelector('#tbl tbody');
-      for (const r of payload.rows) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${r.AccountID}</td>
-          <td>${r.ItemIndex}</td>
-          <td>${r.Group}</td>
-          <td>${r.Type}</td>
-          <td>${r.ItemName}</td>
-          <td>${r.ItemLevel}</td>
-          <td>${r.ItemCount}</td>
-        `;
-        tbody.appendChild(tr);
-      }
+  document.getElementById('meta').textContent =
+    `Last Updated: ${payload.generated_at} | Total Rows: ${payload.rows.length}`;
 
-      $('#tbl').DataTable({
-        order: [[1, 'asc']],   // sort by ItemIndex by default
-        pageLength: 50
-      });
-    }
-    main();
-  </script>
+  const tbody = document.querySelector('#tbl tbody');
+
+  payload.rows.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${r.AccountID}</td>
+      <td>${r.ItemName}</td>
+      <td>${r.ItemLevel}</td>
+      <td>${r.ItemCount}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  $('#tbl').DataTable({
+    order: [[3, 'desc']],  // Sort by Quantity (highest first)
+    pageLength: 50
+  });
+}
+
+loadData();
+</script>
+
 </body>
 </html>
