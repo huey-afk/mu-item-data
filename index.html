@@ -2,18 +2,182 @@
 <html>
 <head>
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Jewel Bank Monitor</title>
+
   <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+
   <style>
-    body { font-family: Arial, sans-serif; margin: 18px; }
-    h1 { margin: 0 0 8px 0; }
-    .meta { color:#555; margin: 0 0 14px 0; }
-    .note { color:#777; font-size: 12px; margin-top: 10px; }
+    :root{
+      --bg:#0b1220;
+      --card:#111a2e;
+      --text:#e6edf7;
+      --muted:#93a4bf;
+      --border:#21304f;
+      --accent:#4f8cff;
+    }
+    body{
+      font-family: Arial, sans-serif;
+      margin: 18px;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:flex-end;
+      justify-content:space-between;
+      flex-wrap:wrap;
+      margin-bottom:14px;
+    }
+    h1{ margin:0; font-size:22px; letter-spacing:.2px; }
+    .meta{ color:var(--muted); font-size:12px; margin-top:6px; }
+
+    .controls{
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .control{
+      display:flex;
+      flex-direction:column;
+      gap:6px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    select, input[type="number"]{
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 10px;
+      outline: none;
+      min-width: 190px;
+    }
+    .btn{
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    .btn.secondary{
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-weight:600;
+    }
+    .btn:active{ transform: translateY(1px); }
+
+    .cards{
+      display:grid;
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      gap:12px;
+      margin: 10px 0 14px 0;
+    }
+    .card{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .card .label{ color: var(--muted); font-size: 12px; }
+    .card .value{ font-size: 18px; font-weight: 700; margin-top: 6px; }
+
+    .note{
+      color:var(--muted);
+      font-size:12px;
+      margin-top:10px;
+    }
+
+    /* DataTables tweaks */
+    table.dataTable{
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+    table.dataTable thead th{
+      background: #0f1930;
+      color: var(--text);
+      border-bottom: 1px solid var(--border) !important;
+    }
+    .dataTables_wrapper .dataTables_filter input{
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px;
+      outline:none;
+    }
+    .dataTables_wrapper .dataTables_length select{
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 6px 8px;
+      outline:none;
+    }
+    .dataTables_info, .dataTables_paginate{
+      color: var(--muted) !important;
+    }
+    a.paginate_button{
+      color: var(--text) !important;
+    }
+    @media (max-width: 900px){
+      .cards{ grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+      select{ min-width: 220px; }
+    }
   </style>
 </head>
+
 <body>
-  <h1>Jewel Bank Monitor</h1>
-  <div class="meta" id="meta">Loading…</div>
+  <div class="topbar">
+    <div>
+      <h1>💎 Jewel Bank Monitor</h1>
+      <div class="meta" id="meta">Loading…</div>
+    </div>
+
+    <div class="controls">
+      <div class="control">
+        <div>Filter by Item</div>
+        <select id="itemFilter">
+          <option value="">All</option>
+        </select>
+      </div>
+
+      <div class="control">
+        <div>Auto refresh (sec)</div>
+        <input id="refreshSec" type="number" min="10" step="5" value="60">
+      </div>
+
+      <button class="btn secondary" id="toggleAuto">Auto: OFF</button>
+      <button class="btn" id="refreshNow">Refresh</button>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <div class="label">Rows</div>
+      <div class="value" id="statRows">—</div>
+    </div>
+    <div class="card">
+      <div class="label">Total ItemCount</div>
+      <div class="value" id="statTotal">—</div>
+    </div>
+    <div class="card">
+      <div class="label">Unique Accounts</div>
+      <div class="value" id="statAccounts">—</div>
+    </div>
+    <div class="card">
+      <div class="label">Last Updated</div>
+      <div class="value" id="statUpdated">—</div>
+    </div>
+  </div>
 
   <table id="tbl" class="display" style="width:100%">
     <thead>
@@ -27,36 +191,124 @@
   </table>
 
   <div class="note">
-    Tip: Use the search box (top right) to filter (e.g. “Bless”, “Soul”, “Chaos”). Click a column header to sort.
+    Tip: Use the search box to filter. Use the “Filter by Item” dropdown to quickly show a specific jewel type.
   </div>
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+
   <script>
-    async function main() {
+    let dt = null;
+    let autoTimer = null;
+    let autoOn = false;
+    let lastPayloadRows = [];
+
+    function fmt(n){
+      try { return new Intl.NumberFormat().format(n); }
+      catch(e){ return String(n); }
+    }
+
+    function computeStats(rows, generatedAt){
+      const total = rows.reduce((s,r)=> s + (Number(r.ItemCount)||0), 0);
+      const accounts = new Set(rows.map(r=> String(r.AccountID || "").trim()).filter(Boolean)).size;
+
+      document.getElementById('statRows').textContent = fmt(rows.length);
+      document.getElementById('statTotal').textContent = fmt(total);
+      document.getElementById('statAccounts').textContent = fmt(accounts);
+      document.getElementById('statUpdated').textContent = generatedAt || "—";
+    }
+
+    function rebuildItemFilter(rows){
+      const sel = document.getElementById('itemFilter');
+      const current = sel.value;
+
+      const names = Array.from(new Set(rows.map(r => r.ItemName).filter(Boolean))).sort((a,b)=> String(a).localeCompare(String(b)));
+      sel.innerHTML = '<option value="">All</option>' + names.map(n => `<option value="${String(n).replaceAll('"','&quot;')}">${n}</option>`).join('');
+
+      // keep prior selection if still exists
+      if (names.includes(current)) sel.value = current;
+    }
+
+    async function loadData() {
       const res = await fetch('./data.json', { cache: 'no-store' });
       const payload = await res.json();
+      const rows = payload.rows || [];
+
+      lastPayloadRows = rows;
 
       document.getElementById('meta').textContent =
-        `Updated: ${payload.generated_at} | Rows: ${payload.rows.length} | Unknown mappings: ${payload.unknown_mappings}`;
+        `Updated: ${payload.generated_at || "—"} | Rows: ${rows.length} | Unknown mappings: ${payload.unknown_mappings ?? "—"}`;
 
-      const tbody = document.querySelector('#tbl tbody');
-      for (const r of payload.rows) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td>${r.AccountID}</td>
-          <td>${r.ItemName}</td>
-          <td>${r.ItemCount}</td>
-        `;
-        tbody.appendChild(tr);
+      computeStats(rows, payload.generated_at);
+      rebuildItemFilter(rows);
+
+      // Build table data array
+      const tableData = rows.map(r => [
+        r.AccountID ?? "",
+        r.ItemName ?? "",
+        Number(r.ItemCount ?? 0)
+      ]);
+
+      if (!dt) {
+        dt = $('#tbl').DataTable({
+          data: tableData,
+          columns: [
+            { title: "AccountID" },
+            { title: "ItemName" },
+            { title: "ItemCount" }
+          ],
+          order: [[2, 'desc']],
+          pageLength: 50
+        });
+      } else {
+        dt.clear();
+        dt.rows.add(tableData);
+        dt.draw();
       }
 
-      $('#tbl').DataTable({
-        order: [[2, 'desc']],   // sort by ItemCount (highest first)
-        pageLength: 50
-      });
+      // Apply dropdown filter if selected
+      applyItemFilter();
     }
-    main();
+
+    function applyItemFilter(){
+      if (!dt) return;
+      const val = document.getElementById('itemFilter').value;
+      // Column 1 = ItemName
+      dt.column(1).search(val ? '^' + escapeRegex(val) + '$' : '', true, false).draw();
+    }
+
+    function escapeRegex(text){
+      return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function setAuto(on){
+      autoOn = on;
+      const btn = document.getElementById('toggleAuto');
+      btn.textContent = on ? 'Auto: ON' : 'Auto: OFF';
+      btn.classList.toggle('secondary', !on);
+
+      if (autoTimer) clearInterval(autoTimer);
+      autoTimer = null;
+
+      if (on) {
+        const sec = Math.max(10, Number(document.getElementById('refreshSec').value || 60));
+        autoTimer = setInterval(loadData, sec * 1000);
+      }
+    }
+
+    document.getElementById('refreshNow').addEventListener('click', loadData);
+    document.getElementById('itemFilter').addEventListener('change', applyItemFilter);
+
+    document.getElementById('toggleAuto').addEventListener('click', () => {
+      setAuto(!autoOn);
+    });
+
+    document.getElementById('refreshSec').addEventListener('change', () => {
+      if (autoOn) setAuto(true); // restart timer with new interval
+    });
+
+    // initial load
+    loadData();
   </script>
 </body>
 </html>
