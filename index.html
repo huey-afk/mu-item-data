@@ -15,7 +15,6 @@
       --muted:#93a4bf;
       --border:#21304f;
       --accent:#4f8cff;
-      --danger:#ff5c7a;
       --warn:#ffb84d;
       --ok:#4dd28a;
     }
@@ -25,7 +24,6 @@
       background: var(--bg);
       color: var(--text);
     }
-
     .topbar{
       display:flex;
       gap:12px;
@@ -34,7 +32,6 @@
       flex-wrap:wrap;
       margin-bottom:14px;
     }
-
     h1{ margin:0; font-size:22px; }
     .meta{ color:var(--muted); font-size:12px; margin-top:6px; }
 
@@ -63,11 +60,14 @@
       cursor:pointer;
       font-weight:600;
     }
-
     .btn.secondary{
       background: transparent;
       border: 1px solid var(--border);
       color: var(--text);
+    }
+    .btn.secondary.active{
+      border-color: var(--accent);
+      background: rgba(79,140,255,0.12);
     }
 
     .cards{
@@ -76,14 +76,12 @@
       gap:12px;
       margin: 10px 0 14px 0;
     }
-
     .card{
       background: var(--card);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 12px;
     }
-
     .card .label{ color: var(--muted); font-size: 12px; }
     .card .value{ font-size: 18px; font-weight: 700; margin-top: 6px; }
 
@@ -110,7 +108,7 @@
       flex-wrap:wrap;
       align-items:center;
     }
-    .pillbar { display:flex; gap:8px; flex-wrap:wrap; }
+    .pillbar { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
     .pill{
       border:1px solid var(--border);
       background: rgba(255,255,255,0.04);
@@ -166,6 +164,11 @@
     <div class="controls">
       <label class="meta" for="minCount">Min ItemCount</label>
       <input id="minCount" type="number" value="0" min="0" style="width:120px" />
+
+      <button class="btn secondary active" id="viewRaw">Raw</button>
+      <button class="btn secondary" id="viewItem">Item Summary</button>
+      <button class="btn secondary" id="viewAccount">Account Summary</button>
+
       <button class="btn" id="btnRefresh">Refresh</button>
       <button class="btn secondary" id="btnReset">Reset Filters</button>
     </div>
@@ -190,18 +193,9 @@
     </div>
   </div>
 
-  <!-- Summary -->
   <div id="summary"></div>
 
-  <table id="tbl" class="display" style="width:100%">
-    <thead>
-      <tr>
-        <th>AccountID</th>
-        <th>ItemName</th>
-        <th>ItemCount</th>
-      </tr>
-    </thead>
-  </table>
+  <table id="tbl" class="display" style="width:100%"></table>
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
@@ -210,23 +204,57 @@
     const DATA_URL = "https://raw.githubusercontent.com/huey-afk/mu-item-data/refs/heads/main/data.json";
 
     let dt = null;
-    let lastRows = [];               // raw rows
-    let activePill = null;           // active quick filter (item/account)
-    let minCountValue = 0;           // min ItemCount filter
 
-    function fmt(n){
-      return new Intl.NumberFormat().format(n || 0);
-    }
+    // state
+    let lastRows = [];
+    let currentView = "raw";          // raw | item | account
+    let activePill = null;            // {type:'item'|'account', value:string} for RAW view only
+    let minCountValue = 0;
 
+    // cached aggregates for views
+    let itemSummary = [];
+    let accountSummary = [];
+
+    function fmt(n){ return new Intl.NumberFormat().format(n || 0); }
     function safeStr(v){
       if (v === null || v === undefined) return "—";
       const s = String(v);
       return s.length ? s : "—";
     }
-
     function toNum(v){
       const n = Number(v);
       return Number.isFinite(n) ? n : 0;
+    }
+    function escapeRegExp(string) {
+      return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+    function escapeHtml(str){
+      return String(str)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    // DataTables custom filter: min count depends on current view
+    $.fn.dataTable.ext.search.push(function(settings, data, dataIndex){
+      // Use numeric column index per view:
+      // raw: ItemCount is col 2
+      // item: TotalCount is col 1
+      // account: TotalCount is col 1
+      let val = 0;
+      if (currentView === "raw") val = Number(data[2]) || 0;
+      else if (currentView === "item") val = Number(data[1]) || 0;
+      else if (currentView === "account") val = Number(data[1]) || 0;
+      return val >= (minCountValue || 0);
+    });
+
+    function setActiveViewButton(view){
+      document.querySelectorAll("#viewRaw,#viewItem,#viewAccount").forEach(b => b.classList.remove("active"));
+      if (view === "raw") document.getElementById("viewRaw").classList.add("active");
+      if (view === "item") document.getElementById("viewItem").classList.add("active");
+      if (view === "account") document.getElementById("viewAccount").classList.add("active");
     }
 
     function clearActivePill(){
@@ -237,49 +265,36 @@
     function applyTableFilters(){
       if (!dt) return;
 
-      // min count filter: we use a DataTables custom search hook
-      dt.draw();
-
-      // item/account pill filter: use column search
-      if (activePill?.type === "item") {
-        dt.column(1).search("^" + escapeRegExp(activePill.value) + "$", true, false);
-        dt.column(0).search(""); // clear account search
-      } else if (activePill?.type === "account") {
-        dt.column(0).search("^" + escapeRegExp(activePill.value) + "$", true, false);
-        dt.column(1).search(""); // clear item search
+      // pill filter is only meaningful in RAW view
+      if (currentView === "raw") {
+        if (activePill?.type === "item") {
+          dt.column(1).search("^" + escapeRegExp(activePill.value) + "$", true, false);
+          dt.column(0).search("");
+        } else if (activePill?.type === "account") {
+          dt.column(0).search("^" + escapeRegExp(activePill.value) + "$", true, false);
+          dt.column(1).search("");
+        } else {
+          dt.column(0).search("");
+          dt.column(1).search("");
+        }
       } else {
-        dt.column(0).search("");
-        dt.column(1).search("");
+        // other views: clear raw-specific column filters
+        dt.columns().search("");
       }
 
       dt.draw();
     }
 
-    function escapeRegExp(string) {
-      return String(string).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    // DataTables custom filter for min ItemCount
-    $.fn.dataTable.ext.search.push(function(settings, data, dataIndex){
-      // data[2] is ItemCount column
-      const count = Number(data[2]) || 0;
-      return count >= (minCountValue || 0);
-    });
-
-    function buildSummary(rows, generatedAt){
-      // totals
+    function buildSummary(rows){
       const totalCount = rows.reduce((s,r)=> s + toNum(r.ItemCount), 0);
 
-      // by item
       const itemTotals = new Map();
-      const itemAccounts = new Map(); // item -> Set(accounts)
-      const itemMaxOneAccount = new Map(); // item -> max count held by a single account
+      const itemAccounts = new Map();          // item -> Set(accounts)
+      const itemMaxOneAccount = new Map();     // item -> max count held by one account
 
-      // by account
       const accountTotals = new Map();
-      const accountUniqueItems = new Map(); // acc -> Set(items)
+      const accountUniqueItems = new Map();    // acc -> Set(items)
 
-      // data health
       let invalidFieldCount = 0;
       let nonPositiveCount = 0;
 
@@ -301,36 +316,43 @@
         accountUniqueItems.get(acc).add(item);
       }
 
-      const topItems = [...itemTotals.entries()]
-        .sort((a,b)=> b[1]-a[1])
-        .slice(0, 10)
-        .map(([item, count]) => ({
-          item,
-          count,
-          holders: itemAccounts.get(item)?.size || 0,
-          maxOne: itemMaxOneAccount.get(item) || 0,
-          pct: totalCount ? (count/totalCount)*100 : 0
-        }));
+      // cache summaries for view switcher
+      itemSummary = [...itemTotals.entries()].map(([item, total]) => {
+        const maxOne = itemMaxOneAccount.get(item) || 0;
+        const holders = itemAccounts.get(item)?.size || 0;
+        const concentration = total ? (maxOne / total) * 100 : 0;
+        return { ItemName: item, TotalCount: total, UniqueAccounts: holders, MaxInOneAccount: maxOne, Concentration: concentration };
+      }).sort((a,b)=> b.TotalCount - a.TotalCount);
 
-      const topAccounts = [...accountTotals.entries()]
-        .sort((a,b)=> b[1]-a[1])
-        .slice(0, 10)
-        .map(([acc, count]) => ({
-          acc,
-          count,
-          uniqueItems: accountUniqueItems.get(acc)?.size || 0
-        }));
+      accountSummary = [...accountTotals.entries()].map(([acc, total]) => {
+        const uniqueItems = accountUniqueItems.get(acc)?.size || 0;
+        return { AccountID: acc, TotalCount: total, UniqueItems: uniqueItems };
+      }).sort((a,b)=> b.TotalCount - a.TotalCount);
 
-      // concentration: items where maxOneAccount / totalItem is high (top 10)
-      const concentrated = topItems
+      const topItems = itemSummary.slice(0, 10).map(x => ({
+        item: x.ItemName,
+        count: x.TotalCount,
+        holders: x.UniqueAccounts,
+        maxOne: x.MaxInOneAccount,
+        pct: totalCount ? (x.TotalCount/totalCount)*100 : 0
+      }));
+
+      const topAccounts = accountSummary.slice(0, 10).map(x => ({
+        acc: x.AccountID,
+        count: x.TotalCount,
+        uniqueItems: x.UniqueItems
+      }));
+
+      const concentrated = [...itemSummary]
+        .sort((a,b)=> b.Concentration - a.Concentration)
+        .slice(0, 10)
         .map(x => ({
-          ...x,
-          concentration: x.count ? (x.maxOne / x.count) * 100 : 0
-        }))
-        .sort((a,b)=> b.concentration - a.concentration)
-        .slice(0, 10);
+          item: x.ItemName,
+          concentration: x.Concentration,
+          maxOne: x.MaxInOneAccount,
+          total: x.TotalCount
+        }));
 
-      // quick filter pills (top 5 items + top 5 accounts)
       const pillHTML = `
         <div class="pillbar">
           ${topItems.slice(0,5).map(x => `<div class="pill" data-type="item" data-value="${escapeHtml(x.item)}">Item: ${escapeHtml(x.item)}</div>`).join("")}
@@ -347,7 +369,7 @@
               ${nonPositiveCount ? `• ${fmt(nonPositiveCount)} rows have ItemCount ≤ 0` : ""}
             </div>
           </div>
-          <div class="meta">Tip: click a pill to filter the table</div>
+          <div class="meta">Tip: pills filter RAW view</div>
         </div>
       ` : `
         <div class="warn" style="border-color: rgba(77,210,138,0.35); background: rgba(77,210,138,0.10); color: #bff4d6;">
@@ -355,7 +377,7 @@
             <strong>Data health</strong>
             <div class="meta" style="margin-top:6px">Looks good: no obvious missing fields, and ItemCount values are mostly positive.</div>
           </div>
-          <div class="meta">Tip: click a pill to filter the table</div>
+          <div class="meta">Tip: pills filter RAW view</div>
         </div>
       `;
 
@@ -397,7 +419,7 @@
             ${concentrated.map(x => `
               <div class="row">
                 <div class="name" title="${escapeHtml(x.item)}">${escapeHtml(x.item)}</div>
-                <div class="meta2">${x.concentration.toFixed(1)}% • max ${fmt(x.maxOne)} / total ${fmt(x.count)}</div>
+                <div class="meta2">${x.concentration.toFixed(1)}% • max ${fmt(x.maxOne)} / total ${fmt(x.total)}</div>
               </div>
             `).join("")}
           </div>
@@ -407,13 +429,12 @@
       const summaryEl = document.getElementById("summary");
       summaryEl.innerHTML = html;
 
-      // Wire pill click handlers
+      // Pill clicks (RAW view only)
       summaryEl.querySelectorAll(".pill").forEach(p => {
         p.addEventListener("click", () => {
           const type = p.getAttribute("data-type");
           const value = p.getAttribute("data-value");
 
-          // toggle behavior
           const already = activePill && activePill.type === type && activePill.value === value;
           clearActivePill();
 
@@ -421,25 +442,93 @@
             activePill = { type, value };
             p.classList.add("active");
           }
+          // auto-switch to RAW so pills always do something
+          if (currentView !== "raw") switchView("raw");
           applyTableFilters();
         });
       });
     }
 
-    function escapeHtml(str){
-      return String(str)
-        .replaceAll("&","&amp;")
-        .replaceAll("<","&lt;")
-        .replaceAll(">","&gt;")
-        .replaceAll('"',"&quot;")
-        .replaceAll("'","&#039;");
+    function buildTable(dataRows, columns, defaultOrder){
+      if (dt) {
+        dt.destroy();
+        $('#tbl').empty();
+      }
+
+      const thead = `
+        <thead>
+          <tr>
+            ${columns.map(c => `<th>${c.title}</th>`).join("")}
+          </tr>
+        </thead>
+      `;
+      $('#tbl').html(thead);
+
+      dt = $('#tbl').DataTable({
+        data: dataRows,
+        columns: columns.map(c => ({ title: c.title })), // keep simple
+        order: [defaultOrder],
+        pageLength: 50,
+        deferRender: true
+      });
     }
 
-    async function loadData() {
-      try {
+    function switchView(view){
+      currentView = view;
+      setActiveViewButton(view);
+
+      // pills are for raw view; clear them if leaving raw
+      if (view !== "raw") clearActivePill();
+
+      if (view === "raw") {
+        const rawData = lastRows.map(r => [
+          safeStr(r.AccountID),
+          safeStr(r.ItemName),
+          toNum(r.ItemCount)
+        ]);
+        buildTable(
+          rawData,
+          [{title:"AccountID"},{title:"ItemName"},{title:"ItemCount"}],
+          [2, "desc"]
+        );
+      }
+
+      if (view === "item") {
+        const itemData = itemSummary.map(r => [
+          r.ItemName,
+          r.TotalCount,
+          r.UniqueAccounts,
+          r.MaxInOneAccount,
+          r.Concentration.toFixed(1) + "%"
+        ]);
+        buildTable(
+          itemData,
+          [{title:"ItemName"},{title:"TotalCount"},{title:"UniqueAccounts"},{title:"MaxInOneAccount"},{title:"Concentration %"}],
+          [1, "desc"]
+        );
+      }
+
+      if (view === "account") {
+        const acctData = accountSummary.map(r => [
+          r.AccountID,
+          r.TotalCount,
+          r.UniqueItems
+        ]);
+        buildTable(
+          acctData,
+          [{title:"AccountID"},{title:"TotalCount"},{title:"UniqueItems"}],
+          [1, "desc"]
+        );
+      }
+
+      applyTableFilters();
+    }
+
+    async function loadData(){
+      try{
         document.getElementById("meta").textContent = "Loading...";
 
-        const url = DATA_URL + "?v=" + Date.now(); // force refresh
+        const url = DATA_URL + "?v=" + Date.now();
         const res = await fetch(url, { cache: "no-store" });
 
         if (!res.ok) {
@@ -465,48 +554,25 @@
 
         document.getElementById("statUpdated").textContent = generatedAt;
 
-        // summary block
-        buildSummary(rows, generatedAt);
+        buildSummary(rows);
 
-        const tableData = rows.map(r => [
-          safeStr(r.AccountID),
-          safeStr(r.ItemName),
-          toNum(r.ItemCount)
-        ]);
+        // rebuild current view using fresh aggregates
+        switchView(currentView);
 
-        if (!dt) {
-          dt = $('#tbl').DataTable({
-            data: tableData,
-            order: [[2, "desc"]],
-            pageLength: 50,
-            deferRender: true
-          });
-        } else {
-          dt.clear().rows.add(tableData).draw();
-        }
-
-        // Re-apply current filters after refresh
-        applyTableFilters();
-
-      } catch (err) {
-        document.getElementById("meta").textContent =
-          "❌ JSON error or network issue";
+      } catch (err){
+        document.getElementById("meta").textContent = "❌ JSON error or network issue";
         console.error(err);
       }
     }
 
     // Controls
-    document.getElementById("btnRefresh").addEventListener("click", () => {
-      loadData();
-    });
+    document.getElementById("btnRefresh").addEventListener("click", loadData);
 
     document.getElementById("btnReset").addEventListener("click", () => {
       document.getElementById("minCount").value = 0;
       minCountValue = 0;
       clearActivePill();
-      if (dt) {
-        dt.search("").columns().search("");
-      }
+      if (dt) dt.search("").columns().search("");
       applyTableFilters();
     });
 
@@ -515,7 +581,11 @@
       applyTableFilters();
     });
 
-    // initial load
+    document.getElementById("viewRaw").addEventListener("click", () => switchView("raw"));
+    document.getElementById("viewItem").addEventListener("click", () => switchView("item"));
+    document.getElementById("viewAccount").addEventListener("click", () => switchView("account"));
+
+    // init
     loadData();
   </script>
 
