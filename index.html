@@ -1,239 +1,66 @@
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Jewel Bank Monitor</title>
+<script>
+  // ✅ CHANGE THIS to your real data.json URL
+  // Option A (GitHub RAW):
+  // const DATA_URL = "https://raw.githubusercontent.com/USER/REPO/main/data.json";
+  //
+  // Option B (GitHub Pages):
+  // const DATA_URL = "https://USER.github.io/REPO/data.json";
 
-  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.8/css/jquery.dataTables.min.css">
+  const DATA_URL = "https://raw.githubusercontent.com/huey-afk/mu-item-data/refs/heads/main/data.json";
 
-  <style>
-    :root{
-      --bg:#0b1220;
-      --card:#111a2e;
-      --text:#e6edf7;
-      --muted:#93a4bf;
-      --border:#21304f;
-      --accent:#4f8cff;
-    }
-    body{
-      font-family: Arial, sans-serif;
-      margin: 18px;
-      background: var(--bg);
-      color: var(--text);
-    }
-    .topbar{
-      display:flex;
-      gap:12px;
-      align-items:flex-end;
-      justify-content:space-between;
-      flex-wrap:wrap;
-      margin-bottom:14px;
-    }
-    h1{ margin:0; font-size:22px; letter-spacing:.2px; }
-    .meta{ color:var(--muted); font-size:12px; margin-top:6px; }
+  let dt = null;
+  let autoTimer = null;
+  let autoOn = false;
+  let lastPayloadRows = [];
 
-    .controls{
-      display:flex;
-      gap:10px;
-      align-items:center;
-      flex-wrap:wrap;
-    }
-    .control{
-      display:flex;
-      flex-direction:column;
-      gap:6px;
-      font-size:12px;
-      color:var(--muted);
-    }
-    select, input[type="number"]{
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 8px 10px;
-      outline: none;
-      min-width: 190px;
-    }
-    .btn{
-      background: var(--accent);
-      color: white;
-      border: none;
-      border-radius: 10px;
-      padding: 10px 12px;
-      cursor:pointer;
-      font-weight:600;
-    }
-    .btn.secondary{
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text);
-      font-weight:600;
-    }
-    .btn:active{ transform: translateY(1px); }
+  function fmt(n){
+    try { return new Intl.NumberFormat().format(n); }
+    catch(e){ return String(n); }
+  }
 
-    .cards{
-      display:grid;
-      grid-template-columns: repeat(4, minmax(160px, 1fr));
-      gap:12px;
-      margin: 10px 0 14px 0;
-    }
-    .card{
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 12px;
-    }
-    .card .label{ color: var(--muted); font-size: 12px; }
-    .card .value{ font-size: 18px; font-weight: 700; margin-top: 6px; }
+  function computeStats(rows, generatedAt){
+    const total = rows.reduce((s,r)=> s + (Number(r.ItemCount)||0), 0);
+    const accounts = new Set(rows.map(r=> String(r.AccountID || "").trim()).filter(Boolean)).size;
 
-    .note{
-      color:var(--muted);
-      font-size:12px;
-      margin-top:10px;
-    }
+    document.getElementById('statRows').textContent = fmt(rows.length);
+    document.getElementById('statTotal').textContent = fmt(total);
+    document.getElementById('statAccounts').textContent = fmt(accounts);
+    document.getElementById('statUpdated').textContent = generatedAt || "—";
+  }
 
-    /* DataTables tweaks */
-    table.dataTable{
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      overflow: hidden;
-    }
-    table.dataTable thead th{
-      background: #0f1930;
-      color: var(--text);
-      border-bottom: 1px solid var(--border) !important;
-    }
-    .dataTables_wrapper .dataTables_filter input{
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 6px 8px;
-      outline:none;
-    }
-    .dataTables_wrapper .dataTables_length select{
-      background: var(--card);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 6px 8px;
-      outline:none;
-    }
-    .dataTables_info, .dataTables_paginate{
-      color: var(--muted) !important;
-    }
-    a.paginate_button{
-      color: var(--text) !important;
-    }
-    @media (max-width: 900px){
-      .cards{ grid-template-columns: repeat(2, minmax(160px, 1fr)); }
-      select{ min-width: 220px; }
-    }
-  </style>
-</head>
+  function rebuildItemFilter(rows){
+    const sel = document.getElementById('itemFilter');
+    const current = sel.value;
 
-<body>
-  <div class="topbar">
-    <div>
-      <h1>💎 Jewel Bank Monitor</h1>
-      <div class="meta" id="meta">Loading…</div>
-    </div>
+    const names = Array.from(new Set(rows.map(r => r.ItemName).filter(Boolean)))
+      .sort((a,b)=> String(a).localeCompare(String(b)));
 
-    <div class="controls">
-      <div class="control">
-        <div>Filter by Item</div>
-        <select id="itemFilter">
-          <option value="">All</option>
-        </select>
-      </div>
+    sel.innerHTML =
+      '<option value="">All</option>' +
+      names.map(n => `<option value="${String(n).replaceAll('"','&quot;')}">${n}</option>`).join('');
 
-      <div class="control">
-        <div>Auto refresh (sec)</div>
-        <input id="refreshSec" type="number" min="10" step="5" value="60">
-      </div>
+    if (names.includes(current)) sel.value = current;
+  }
 
-      <button class="btn secondary" id="toggleAuto">Auto: OFF</button>
-      <button class="btn" id="refreshNow">Refresh</button>
-    </div>
-  </div>
+  async function loadData() {
+    try {
+      if (!DATA_URL || DATA_URL.includes("PASTE_YOUR_DATA_JSON_URL_HERE")) {
+        document.getElementById('meta').textContent =
+          "❌ Please set DATA_URL to your data.json (Raw GitHub or GitHub Pages link).";
+        return;
+      }
 
-  <div class="cards">
-    <div class="card">
-      <div class="label">Rows</div>
-      <div class="value" id="statRows">—</div>
-    </div>
-    <div class="card">
-      <div class="label">Total ItemCount</div>
-      <div class="value" id="statTotal">—</div>
-    </div>
-    <div class="card">
-      <div class="label">Unique Accounts</div>
-      <div class="value" id="statAccounts">—</div>
-    </div>
-    <div class="card">
-      <div class="label">Last Updated</div>
-      <div class="value" id="statUpdated">—</div>
-    </div>
-  </div>
+      // ✅ cache-buster to force latest file
+      const res = await fetch(DATA_URL + "?v=" + Date.now(), { cache: "no-store" });
 
-  <table id="tbl" class="display" style="width:100%">
-    <thead>
-      <tr>
-        <th>AccountID</th>
-        <th>ItemName</th>
-        <th>ItemCount</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+      if (!res.ok) {
+        document.getElementById('meta').textContent =
+          `❌ Failed to load data.json (${res.status}). Check DATA_URL.`;
+        return;
+      }
 
-  <div class="note">
-    Tip: Use the search box to filter. Use the “Filter by Item” dropdown to quickly show a specific jewel type.
-  </div>
-
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
-
-  <script>
-    let dt = null;
-    let autoTimer = null;
-    let autoOn = false;
-    let lastPayloadRows = [];
-
-    function fmt(n){
-      try { return new Intl.NumberFormat().format(n); }
-      catch(e){ return String(n); }
-    }
-
-    function computeStats(rows, generatedAt){
-      const total = rows.reduce((s,r)=> s + (Number(r.ItemCount)||0), 0);
-      const accounts = new Set(rows.map(r=> String(r.AccountID || "").trim()).filter(Boolean)).size;
-
-      document.getElementById('statRows').textContent = fmt(rows.length);
-      document.getElementById('statTotal').textContent = fmt(total);
-      document.getElementById('statAccounts').textContent = fmt(accounts);
-      document.getElementById('statUpdated').textContent = generatedAt || "—";
-    }
-
-    function rebuildItemFilter(rows){
-      const sel = document.getElementById('itemFilter');
-      const current = sel.value;
-
-      const names = Array.from(new Set(rows.map(r => r.ItemName).filter(Boolean))).sort((a,b)=> String(a).localeCompare(String(b)));
-      sel.innerHTML = '<option value="">All</option>' + names.map(n => `<option value="${String(n).replaceAll('"','&quot;')}">${n}</option>`).join('');
-
-      // keep prior selection if still exists
-      if (names.includes(current)) sel.value = current;
-    }
-
-    async function loadData() {
-      const res = await fetch('./data.json', { cache: 'no-store' });
       const payload = await res.json();
       const rows = payload.rows || [];
-
       lastPayloadRows = rows;
 
       document.getElementById('meta').textContent =
@@ -242,7 +69,6 @@
       computeStats(rows, payload.generated_at);
       rebuildItemFilter(rows);
 
-      // Build table data array
       const tableData = rows.map(r => [
         r.AccountID ?? "",
         r.ItemName ?? "",
@@ -266,49 +92,49 @@
         dt.draw();
       }
 
-      // Apply dropdown filter if selected
       applyItemFilter();
+    } catch (err) {
+      document.getElementById('meta').textContent =
+        "❌ Error loading JSON. Open DevTools Console to see details.";
+      console.error(err);
     }
+  }
 
-    function applyItemFilter(){
-      if (!dt) return;
-      const val = document.getElementById('itemFilter').value;
-      // Column 1 = ItemName
-      dt.column(1).search(val ? '^' + escapeRegex(val) + '$' : '', true, false).draw();
+  function applyItemFilter(){
+    if (!dt) return;
+    const val = document.getElementById('itemFilter').value;
+    dt.column(1).search(val ? '^' + escapeRegex(val) + '$' : '', true, false).draw();
+  }
+
+  function escapeRegex(text){
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function setAuto(on){
+    autoOn = on;
+    const btn = document.getElementById('toggleAuto');
+    btn.textContent = on ? 'Auto: ON' : 'Auto: OFF';
+    btn.classList.toggle('secondary', !on);
+
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = null;
+
+    if (on) {
+      const sec = Math.max(10, Number(document.getElementById('refreshSec').value || 60));
+      autoTimer = setInterval(loadData, sec * 1000);
     }
+  }
 
-    function escapeRegex(text){
-      return String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
+  document.getElementById('refreshNow').addEventListener('click', loadData);
+  document.getElementById('itemFilter').addEventListener('change', applyItemFilter);
 
-    function setAuto(on){
-      autoOn = on;
-      const btn = document.getElementById('toggleAuto');
-      btn.textContent = on ? 'Auto: ON' : 'Auto: OFF';
-      btn.classList.toggle('secondary', !on);
+  document.getElementById('toggleAuto').addEventListener('click', () => {
+    setAuto(!autoOn);
+  });
 
-      if (autoTimer) clearInterval(autoTimer);
-      autoTimer = null;
+  document.getElementById('refreshSec').addEventListener('change', () => {
+    if (autoOn) setAuto(true);
+  });
 
-      if (on) {
-        const sec = Math.max(10, Number(document.getElementById('refreshSec').value || 60));
-        autoTimer = setInterval(loadData, sec * 1000);
-      }
-    }
-
-    document.getElementById('refreshNow').addEventListener('click', loadData);
-    document.getElementById('itemFilter').addEventListener('change', applyItemFilter);
-
-    document.getElementById('toggleAuto').addEventListener('click', () => {
-      setAuto(!autoOn);
-    });
-
-    document.getElementById('refreshSec').addEventListener('change', () => {
-      if (autoOn) setAuto(true); // restart timer with new interval
-    });
-
-    // initial load
-    loadData();
-  </script>
-</body>
-</html>
+  loadData();
+</script>
